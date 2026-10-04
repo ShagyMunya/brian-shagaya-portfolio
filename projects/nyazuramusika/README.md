@@ -15,6 +15,12 @@ A native Android marketplace for buying and selling goods around Nyazura. Built 
 
 Listings and photos are stored in a shared service rather than on a single phone. No sample listings are published as real goods. USD, ZiG and ZAR are labels for seller-entered prices; the app does not convert currencies or process payments.
 
+## Download the Android APK
+
+[Download NyazuraMusika.apk](downloads/NyazuraMusika.apk?raw=true). This is the compiled debug build for testing.
+
+The marketplace service is currently an owner-private preview. Public activation is required before local buyers and sellers can reach it from the Android app.
+
 ## Android app
 
 Open `android/` as the project in Android Studio. The app supports Android 8.0 (API 26) and later. Build with JDK 17, Android SDK 36, Android Gradle Plugin 8.13.2 and the supplied Gradle 8.13 wrapper.
