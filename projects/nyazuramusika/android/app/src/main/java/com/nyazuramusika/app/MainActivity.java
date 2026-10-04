@@ -1,0 +1,213 @@
+package com.nyazuramusika.app;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.media.ExifInterface;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.util.LruCache;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends Activity {
+    private static final int NAVY=Color.rgb(20,39,56), ORANGE=Color.rgb(182,71,23), GOLD=Color.rgb(255,179,77);
+    private static final int INK=NAVY, MUTED=Color.rgb(82,100,117), PALE=Color.rgb(244,247,250), BORDER=Color.rgb(219,226,232);
+    private static final String[] CATEGORIES={"Produce","Electronics","Clothing","Home & furniture","Farm supplies","Vehicles & parts","Other"};
+    private static final String[] CURRENCIES={"USD","ZiG","ZAR"}, CONDITIONS={"New","Used","Not applicable"};
+    private static final int PHOTO_REQUEST=102;
+    private final Handler ui=new Handler(Looper.getMainLooper());
+    private final ExecutorService executor=Executors.newFixedThreadPool(3);
+    private final Map<String,EditText> fields=new LinkedHashMap<>();
+    private final LruCache<String,Bitmap> photoCache=new LruCache<>(8*1024*1024) {
+        @Override protected int sizeOf(String key,Bitmap bitmap){return bitmap.getAllocationByteCount();}
+    };
+    private SecureSession secure;
+    private LinearLayout root, content, results, tabs;
+    private ProgressBar progress;
+    private TextView notice;
+    private String screen="browse", query="", category="", area="", authAfter="sell", imageId="", photoUri="";
+    private JSONObject seller=new JSONObject(), editing;
+    private Spinner categoryPicker,currencyPicker,conditionPicker;
+    private ImageView selectedPhoto;
+    private byte[] photoJpeg;
+    private long epoch=0, listRequest=0;
+    private int offset=0;
+    private boolean saving=false,photoLoading=false;
+    private final Map<String,Button> categoryButtons=new LinkedHashMap<>();
+    private Runnable pendingSearch;
+
+    @Override public void onCreate(Bundle saved) {
+        super.onCreate(saved);secure=new SecureSession(this);
+        try{seller=new JSONObject(secure.get("seller"));}catch(Exception ignored){}
+        createShell();
+        if(handleAuthIntent(getIntent()))return;
+        if(saved!=null) {
+            query=saved.getString("query","");category=saved.getString("category","");area=saved.getString("area","");
+            String previous=saved.getString("screen","browse");
+            if(previous.equals("form")) {
+                try{JSONObject record=new JSONObject(saved.getString("draft","{}"));showForm(record.optString("id").isEmpty()?null:record,record);
+                    photoUri=saved.getString("photoUri","");if(!photoUri.isEmpty())loadSelectedPhoto(Uri.parse(photoUri));return;}catch(Exception ignored){}
+            }
+            if(previous.equals("my")){showMy();return;}
+            if(previous.equals("profile")){showProfile();return;}
+        }
+        showBrowse();
+    }
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);handleAuthIntent(intent);}
+    @Override protected void onDestroy(){super.onDestroy();epoch++;executor.shutdownNow();ui.removeCallbacksAndMessages(null);}
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);state.putString("screen",screen);state.putString("query",query);state.putString("category",category);state.putString("area",area);
+        if(screen.equals("form")) { try{state.putString("draft",formData(false).toString());state.putString("photoUri",photoUri);}catch(Exception ignored){} }
+    }
+    @Override public void onBackPressed(){if(saving){toast("Please wait for the listing to finish saving.");return;}if(screen.equals("browse"))super.onBackPressed();else showBrowse();}
+
+    private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
+    private GradientDrawable background(int color,int radius,boolean border){GradientDrawable drawable=new GradientDrawable();drawable.setColor(color);drawable.setCornerRadius(dp(radius));if(border)drawable.setStroke(dp(1),BORDER);return drawable;}
+    private LinearLayout box(){LinearLayout view=new LinearLayout(this);view.setOrientation(LinearLayout.VERTICAL);return view;}
+    private TextView text(String value,int size,int color,boolean bold){TextView view=new TextView(this);view.setText(value);view.setTextSize(size);view.setTextColor(color);view.setLineSpacing(dp(3),1);if(bold)view.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return view;}
+    private void add(LinearLayout parent,View view,int margin){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.bottomMargin=dp(margin);parent.addView(view,params);}
+    private Button button(String value,boolean primary,Runnable action){Button view=new Button(this);view.setText(value);view.setTextSize(15);view.setAllCaps(false);view.setMinHeight(dp(48));view.setPadding(dp(14),dp(10),dp(14),dp(10));view.setTextColor(primary?Color.WHITE:INK);view.setBackground(background(primary?ORANGE:Color.WHITE,12,!primary));view.setOnClickListener(v->action.run());return view;}
+    private EditText input(LinearLayout parent,String key,String label,String value,int type){add(parent,text(label,14,MUTED,true),4);EditText view=new EditText(this);view.setSingleLine(true);view.setTextSize(16);view.setTextColor(INK);view.setHintTextColor(MUTED);view.setPadding(dp(12),dp(10),dp(12),dp(10));view.setMinHeight(dp(50));view.setInputType(type);view.setBackground(background(Color.WHITE,10,true));view.setText(value);view.setContentDescription(label);fields.put(key,view);add(parent,view,15);return view;}
+    private Spinner picker(LinearLayout parent,String label,String[] values,String current){add(parent,text(label,14,MUTED,true),4);Spinner spinner=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,values);spinner.setAdapter(adapter);spinner.setContentDescription(label);spinner.setMinimumHeight(dp(50));spinner.setBackground(background(Color.WHITE,10,true));for(int i=0;i<values.length;i++)if(values[i].equals(current))spinner.setSelection(i);add(parent,spinner,15);return spinner;}
+    private void createShell(){
+        root=box();root.setBackgroundColor(NAVY);setContentView(root);
+        root.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(0,insets.getSystemWindowInsetTop(),0,insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(16),dp(12),dp(16),dp(12));
+        TextView mark=text("N",24,NAVY,true);mark.setGravity(Gravity.CENTER);mark.setBackground(background(GOLD,13,false));header.addView(mark,new LinearLayout.LayoutParams(dp(42),dp(42)));
+        LinearLayout branding=box();branding.setPadding(dp(12),0,0,0);branding.addView(text("NyazuraMusika",22,Color.WHITE,true));branding.addView(text("Buy & sell around Nyazura",14,Color.rgb(204,216,226),false));header.addView(branding,new LinearLayout.LayoutParams(0,-2,1));root.addView(header);
+        progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setVisibility(View.GONE);root.addView(progress,new LinearLayout.LayoutParams(-1,dp(3)));
+        notice=text("",14,Color.WHITE,false);notice.setPadding(dp(16),dp(8),dp(16),dp(8));notice.setVisibility(View.GONE);root.addView(notice);
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(PALE);content=box();content.setPadding(dp(16),dp(18),dp(16),dp(18));scroll.addView(content);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        tabs=new LinearLayout(this);tabs.setBackgroundColor(Color.WHITE);tabs.setPadding(dp(8),dp(8),dp(8),dp(8));root.addView(tabs);
+    }
+    private void reset(String next){epoch++;screen=next;fields.clear();content.removeAllViews();notice.setVisibility(View.GONE);progress.setVisibility(View.GONE);tabs.removeAllViews();
+        String[] labels={"Browse","Sell goods","My listings"};Runnable[] actions={this::showBrowse,this::showSell,this::showMy};for(int i=0;i<labels.length;i++){Button tab=button(labels[i],false,actions[i]);tab.setTextSize(14);LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(0,-2,1);params.setMargins(dp(3),0,dp(3),0);tabs.addView(tab,params);}}
+    private void toast(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
+    private void busy(boolean value){progress.setVisibility(value?View.VISIBLE:View.GONE);}
+    private void error(String message){notice.setText(message);notice.setVisibility(View.VISIBLE);}
+    private boolean canMove(){if(saving){toast("Please wait for the listing to finish saving.");return false;}return true;}
+    private boolean signedIn(){return !secure.get("token").isEmpty();}
+    private interface Task{JSONObject run()throws Exception;}
+    private interface Done{void accept(JSONObject result)throws Exception;}
+    private void job(Task task,Done done,Runnable failed){final long viewEpoch=epoch;busy(true);executor.execute(()->{
+        try{JSONObject result=task.run();ui.post(()->{if(isDestroyed()||epoch!=viewEpoch)return;busy(false);try{done.accept(result);}catch(Exception e){error("Unable to complete this action. Please try again.");if(failed!=null)failed.run();}});}
+        catch(Exception exception){ui.post(()->{if(isDestroyed()||epoch!=viewEpoch)return;busy(false);String message=exception.getMessage();error(exception instanceof MarketApi.ApiException?message:"Could not connect. Check your internet connection and try again.");if(failed!=null)failed.run();});}
+    });}
+    private void watch(EditText input,Runnable action){input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){action.run();}public void afterTextChanged(Editable value){}});}
+
+    private void showBrowse(){if(!canMove())return;reset("browse");add(content,text("Find something nearby",25,INK,true),14);
+        EditText search=input(content,"search","Search goods",query,InputType.TYPE_CLASS_TEXT);search.setHint("What are you looking for?");
+        EditText location=input(content,"area","Area (optional)",area,InputType.TYPE_CLASS_TEXT);location.setHint("Nyazura or your nearby area");
+        Runnable changed=()->{query=search.getText().toString();area=location.getText().toString();if(pendingSearch!=null)ui.removeCallbacks(pendingSearch);pendingSearch=()->{if(screen.equals("browse"))loadMarket(false);};ui.postDelayed(pendingSearch,400);};watch(search,changed);watch(location,changed);
+        HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.setHorizontalScrollBarEnabled(false);LinearLayout row=new LinearLayout(this);horizontal.addView(row);
+        categoryButtons.clear();String[] all=new String[CATEGORIES.length+1];all[0]="All";System.arraycopy(CATEGORIES,0,all,1,CATEGORIES.length);
+        for(String label:all){String value=label.equals("All")?"":label;Button chip=button(label,false,()->{category=value;for(Map.Entry<String,Button> entry:categoryButtons.entrySet()){boolean chosen=entry.getKey().equals(category);entry.getValue().setTextColor(chosen?Color.WHITE:INK);entry.getValue().setBackground(background(chosen?NAVY:Color.WHITE,20,!chosen));}loadMarket(false);});if(category.equals(value)){chip.setTextColor(Color.WHITE);chip.setBackground(background(NAVY,20,false));}LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-2,-2);params.rightMargin=dp(8);row.addView(chip,params);categoryButtons.put(value,chip);}add(content,horizontal,16);
+        add(content,button("Refresh market",false,()->loadMarket(false)),12);results=box();content.addView(results);loadMarket(false);
+    }
+    private void loadMarket(boolean more){if(!screen.equals("browse"))return;final long requestId=++listRequest;if(!more){offset=0;results.removeAllViews();add(results,text("Loading goods…",16,MUTED,false),12);}final int page=offset;
+        String path="/api/listings?limit=20&offset="+page+"&q="+Uri.encode(query)+"&location="+Uri.encode(area)+(category.isEmpty()?"":"&category="+Uri.encode(category));
+        job(()->MarketApi.call(path,"GET",null,null),response->{if(requestId!=listRequest)return;if(!more)results.removeAllViews();JSONArray items=response.getJSONArray("listings");
+            if(!more&&items.length()==0){add(results,text("No goods found",23,INK,true),8);add(results,text(query.isEmpty()&&category.isEmpty()&&area.isEmpty()?"Be the first to post goods for sale around Nyazura.":"Try a different search, category or area.",16,MUTED,false),16);add(results,button("Post goods for sale",true,this::showSell),12);}
+            for(int i=0;i<items.length();i++)add(results,card(items.getJSONObject(i),false),14);
+            offset=response.getInt("next_offset");if(response.optBoolean("has_more")){Button load=button("Load more goods",false,()->{});load.setOnClickListener(v->{load.setEnabled(false);loadMarket(true);results.removeView(load);});add(results,load,12);}
+        },()->{if(requestId==listRequest&&!more){results.removeAllViews();add(results,text("The market could not load.",18,INK,true),8);add(results,button("Try again",true,()->loadMarket(false)),12);}});
+    }
+    private LinearLayout card(JSONObject listing,boolean owned){LinearLayout card=box();card.setBackground(background(Color.WHITE,16,true));card.setPadding(dp(12),dp(12),dp(12),dp(12));
+        String image=listing.optString("image_path","");if(!image.isEmpty()&&!image.equals("null")){ImageView picture=new ImageView(this);picture.setScaleType(ImageView.ScaleType.CENTER_CROP);picture.setContentDescription(listing.optString("title"));picture.setBackground(background(PALE,10,false));picture.setClipToOutline(true);card.addView(picture,new LinearLayout.LayoutParams(-1,dp(165)));fetchPhoto(image,picture,false);}
+        TextView tag=text(listing.optString("category")+(listing.optString("status").equals("sold")?"  ·  SOLD":""),14,MUTED,true);tag.setPadding(0,dp(10),0,0);add(card,tag,6);
+        add(card,text(listing.optString("title"),21,INK,true),6);add(card,text(MarketRules.price(listing.optLong("price_minor"),listing.optString("currency")),23,ORANGE,true),6);add(card,text(listing.optString("location")+" · "+listing.optString("condition"),14,MUTED,false),12);
+        add(card,button(owned?"Manage listing":"View goods",false,()->showDetails(listing)),0);return card;
+    }
+    private void fetchPhoto(String path,ImageView target,boolean large){Bitmap cached=photoCache.get(path+(large?"large":"small"));if(cached!=null){target.setImageBitmap(cached);return;}final long version=epoch;executor.execute(()->{try{byte[] bytes=MarketApi.photo(path);BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=large?1:2;Bitmap image=BitmapFactory.decodeByteArray(bytes,0,bytes.length,options);if(image!=null){photoCache.put(path+(large?"large":"small"),image);ui.post(()->{if(epoch==version&&!isDestroyed())target.setImageBitmap(image);});}}catch(Exception ignored){ui.post(()->{if(epoch==version)target.setContentDescription("Photo could not load");});}});}
+    private void showDetails(JSONObject initial){if(!canMove())return;reset("detail");add(content,button("Back to market",false,this::showBrowse),12);add(content,text("Loading listing…",16,MUTED,false),12);
+        job(()->MarketApi.call("/api/listings/"+initial.getString("id"),"GET",null,null),response->renderDetails(response.getJSONObject("listing")),null);
+    }
+    private void renderDetails(JSONObject listing){content.removeAllViews();add(content,button("Back to market",false,this::showBrowse),14);
+        String path=listing.optString("image_path","");if(!path.isEmpty()&&!path.equals("null")){ImageView picture=new ImageView(this);picture.setScaleType(ImageView.ScaleType.CENTER_CROP);picture.setContentDescription(listing.optString("title"));content.addView(picture,new LinearLayout.LayoutParams(-1,dp(250)));fetchPhoto(path,picture,true);}
+        add(content,text(listing.optString("category")+" · "+listing.optString("condition"),14,MUTED,true),8);add(content,text(listing.optString("title"),29,INK,true),10);add(content,text(MarketRules.price(listing.optLong("price_minor"),listing.optString("currency")),29,ORANGE,true),12);
+        add(content,text(listing.optString("description"),17,INK,false),18);add(content,text("Collection area",14,MUTED,true),3);add(content,text(listing.optString("location"),18,INK,false),16);
+        add(content,text("Seller",14,MUTED,true),3);add(content,text(listing.optString("seller_name"),18,INK,true),12);
+        boolean owned=signedIn()&&listing.optString("owner_id").equals(seller.optString("id"));
+        if(owned){add(content,button("Edit listing",true,()->showForm(listing,null)),10);add(content,button(listing.optString("status").equals("sold")?"Make available again":"Mark as sold",false,()->changeStatus(listing)),10);add(content,button("Remove listing",false,()->new AlertDialog.Builder(this).setTitle("Remove this listing?").setMessage("It will disappear from the market.").setNegativeButton("Keep listing",null).setPositiveButton("Remove",(dialog,which)->removeListing(listing)).show()),10);}
+        else if(listing.optString("status").equals("sold"))add(content,text("This item has been sold.",19,MUTED,true),12);
+        else{add(content,button("Contact seller on WhatsApp",true,()->contact(listing)),12);add(content,text("Agree on payment and collection directly with the seller.",14,MUTED,false),12);}
+    }
+    private void contact(JSONObject listing){try{String number=MarketRules.whatsapp(listing.getString("whatsapp")).substring(1);String message="Hi "+listing.optString("seller_name")+", I saw your "+listing.optString("title")+" on NyazuraMusika for "+MarketRules.price(listing.optLong("price_minor"),listing.optString("currency"))+". Is it still available?";openUrl("https://wa.me/"+number+"?text="+Uri.encode(message));}catch(Exception e){toast("The seller's WhatsApp number is unavailable.");}}
+    private void changeStatus(JSONObject listing){job(()->{JSONObject data=new JSONObject(listing.toString());data.put("status",listing.optString("status").equals("sold")?"active":"sold");return MarketApi.call("/api/listings/"+listing.getString("id"),"PUT",data,secure.get("token"));},result->{toast("Listing updated.");showMy();},null);}
+    private void removeListing(JSONObject listing){job(()->MarketApi.call("/api/listings/"+listing.getString("id"),"DELETE",null,secure.get("token")),result->{toast("Listing removed.");showMy();},null);}
+
+    private void showSell(){if(!canMove())return;if(!signedIn()){showSignIn("sell");return;}if(seller.optString("whatsapp").isEmpty()||seller.optString("display_name").isEmpty()){showProfile();return;}showForm(null,null);}
+    private void showMy(){if(!canMove())return;if(!signedIn()){showSignIn("my");return;}reset("my");add(content,text("My listings",27,INK,true),10);add(content,button("Seller profile",false,this::showProfile),14);
+        job(()->MarketApi.call("/api/my-listings","GET",null,secure.get("token")),response->{JSONArray items=response.getJSONArray("listings");if(items.length()==0){add(content,text("Your stall is ready",23,INK,true),8);add(content,text("Post your first item and let nearby buyers find it.",16,MUTED,false),14);add(content,button("Sell goods",true,this::showSell),12);}for(int i=0;i<items.length();i++)add(content,card(items.getJSONObject(i),true),14);},()->add(content,button("Sign in again",false,()->showSignIn("my")),12));
+    }
+    private void showSignIn(String after){if(!canMove())return;reset("signin");authAfter=after;add(content,text("Open your market stall",29,INK,true),12);add(content,text("Sign in to post goods, update prices and manage your listings.",17,MUTED,false),16);add(content,button("Sign in with ChatGPT",true,this::startSignIn),12);add(content,text("Your browser will open for sign-in. Then tap Return to NyazuraMusika. Buyers can browse without signing in.",15,MUTED,false),14);add(content,button("Browse goods",false,this::showBrowse),12);}
+    private String randomToken(int length){byte[] bytes=new byte[length];new SecureRandom().nextBytes(bytes);return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);}
+    private void startSignIn(){try{String verifier=randomToken(32),state=randomToken(24);secure.put("verifier",verifier);secure.put("state",state);secure.put("started",Long.toString(System.currentTimeMillis()));secure.put("after",authAfter);String challenge=Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.UTF_8)));openUrl(BuildConfig.MARKET_API_ORIGIN+"/android/connect?challenge="+Uri.encode(challenge)+"&state="+Uri.encode(state));}catch(Exception e){error("Secure sign-in could not start on this device. Please try again.");}}
+    private boolean handleAuthIntent(Intent intent){Uri link=intent.getData();if(link==null||!"nyazuramusika".equals(link.getScheme())||!"auth".equals(link.getHost()))return false;
+        String state=link.getQueryParameter("state"),code=link.getQueryParameter("code"),verifier=secure.get("verifier");long started=0;try{started=Long.parseLong(secure.get("started"));}catch(Exception ignored){}
+        if(state==null||!state.equals(secure.get("state"))||code==null||!code.matches("[A-Za-z0-9_-]{43}")||verifier.isEmpty()||System.currentTimeMillis()-started>600_000){showSignIn("sell");error("That sign-in link expired. Please start again.");return true;}
+        reset("signin");add(content,text("Connecting your stall…",25,INK,true),12);String expectedState=state;
+        job(()->{JSONObject data=new JSONObject();data.put("code",code);data.put("verifier",verifier);data.put("state",expectedState);return MarketApi.call("/api/auth/exchange","POST",data,null);},result->{secure.put("token",result.getString("token"));seller=result.getJSONObject("seller");secure.put("seller",seller.toString());secure.remove("verifier");secure.remove("state");secure.remove("started");toast("You are signed in.");if(seller.optString("whatsapp").isEmpty())showProfile();else if(secure.get("after").equals("my"))showMy();else showSell();},()->add(content,button("Start sign-in again",true,()->showSignIn("sell")),12));return true;
+    }
+    private void showProfile(){if(!canMove())return;if(!signedIn()){showSignIn("my");return;}reset("profile");add(content,text("Seller profile",27,INK,true),10);add(content,text("Your seller name and WhatsApp number appear on your listings.",16,MUTED,false),16);input(content,"name","Seller name",seller.optString("display_name"),InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS);EditText phone=input(content,"phone","WhatsApp number",seller.optString("whatsapp"),InputType.TYPE_CLASS_PHONE);phone.setHint("+263771234567");
+        Button save=button("Save profile",true,()->{});save.setOnClickListener(v->{try{String name=fields.get("name").getText().toString().trim();if(name.length()<2||name.length()>60)throw new IllegalArgumentException("Enter a seller name containing 2–60 characters.");JSONObject data=new JSONObject();data.put("display_name",name);data.put("whatsapp",MarketRules.whatsapp(fields.get("phone").getText().toString()));save.setEnabled(false);job(()->MarketApi.call("/api/me","PUT",data,secure.get("token")),result->{seller=result.getJSONObject("seller");secure.put("seller",seller.toString());toast("Seller profile saved.");showSell();},()->save.setEnabled(true));}catch(Exception e){error(e.getMessage());}});add(content,save,12);
+        add(content,button("Sign in again",false,()->showSignIn("my")),10);add(content,button("Sign out",false,()->{String token=secure.get("token");executor.execute(()->{try{MarketApi.call("/api/auth/logout","POST",null,token);}catch(Exception ignored){}});secure.clearAccount();seller=new JSONObject();showBrowse();}),12);add(content,button("Privacy and your listings",false,()->openUrl(BuildConfig.MARKET_API_ORIGIN+"/privacy")),10);
+    }
+
+    private void showForm(JSONObject record,JSONObject draft){if(!canMove())return;reset("form");editing=record;imageId=record==null?"":record.optString("image_id","");if(imageId.equals("null"))imageId="";photoJpeg=null;photoUri="";photoLoading=false;JSONObject data=draft!=null?draft:record!=null?record:new JSONObject();
+        add(content,text(record==null?"Sell goods":"Edit your listing",27,INK,true),14);input(content,"title","What are you selling?",data.optString("title"),InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        EditText description=input(content,"description","Description",data.optString("description"),InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);description.setSingleLine(false);description.setMinLines(3);description.setGravity(Gravity.TOP);description.setHint("Condition, size and what the buyer should know");
+        input(content,"price","Price",data.has("price_minor")?MarketRules.priceText(data.optLong("price_minor")):"",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        currencyPicker=picker(content,"Currency",CURRENCIES,data.optString("currency","USD"));categoryPicker=picker(content,"Category",CATEGORIES,data.optString("category","Produce"));conditionPicker=picker(content,"Condition",CONDITIONS,data.optString("condition","Used"));input(content,"location","Collection area",data.optString("location","Nyazura"),InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        selectedPhoto=new ImageView(this);selectedPhoto.setContentDescription("Selected product photo");selectedPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);selectedPhoto.setVisibility(View.GONE);content.addView(selectedPhoto,new LinearLayout.LayoutParams(-1,dp(180)));
+        if(!imageId.isEmpty()){selectedPhoto.setVisibility(View.VISIBLE);fetchPhoto("/api/images/"+imageId,selectedPhoto,true);}add(content,button("Choose a product photo",false,()->{if(saving){toast("Please wait for the listing to finish saving.");return;}Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.setType("image/*");pick.addCategory(Intent.CATEGORY_OPENABLE);pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);try{startActivityForResult(pick,PHOTO_REQUEST);}catch(Exception e){toast("No photo picker is available on this device.");}}),12);
+        add(content,text("Your seller details and collection area will be visible to buyers.",14,MUTED,false),12);Button save=button(record==null?"Post goods for sale":"Save changes",true,()->{});save.setOnClickListener(v->saveListing(save));add(content,save,12);add(content,button("Cancel",false,this::showMy),12);
+    }
+    private JSONObject formData(boolean validate)throws Exception {JSONObject data=new JSONObject();String title=fields.get("title").getText().toString().trim(),description=fields.get("description").getText().toString().trim(),location=fields.get("location").getText().toString().trim();if(validate){if(title.length()<3||title.length()>100)throw new IllegalArgumentException("Enter a title containing 3–100 characters.");if(description.length()<10||description.length()>2000)throw new IllegalArgumentException("Enter a description containing 10–2000 characters.");if(location.length()<2||location.length()>80)throw new IllegalArgumentException("Enter a collection area containing 2–80 characters.");}
+        data.put("title",title);data.put("description",description);data.put("location",location);String price=fields.get("price").getText().toString();if(validate||!price.isEmpty()){try{data.put("price_minor",MarketRules.priceMinor(price));}catch(Exception e){if(validate)throw e;}}
+        data.put("category",categoryPicker.getSelectedItem().toString());data.put("currency",currencyPicker.getSelectedItem().toString());data.put("condition",conditionPicker.getSelectedItem().toString());data.put("image_id",imageId.isEmpty()?JSONObject.NULL:imageId);data.put("status",editing==null?"active":editing.optString("status","active"));if(editing!=null)data.put("id",editing.optString("id"));return data;
+    }
+    private void saveListing(Button button){if(saving)return;if(photoLoading){toast("Please wait for your photo to finish loading.");return;}try{JSONObject data=formData(true);final byte[] jpeg=photoJpeg;final JSONObject old=editing;final String token=secure.get("token");saving=true;button.setEnabled(false);job(()->{if(jpeg!=null){String uploaded=MarketApi.upload(jpeg,token);data.put("image_id",uploaded);}return MarketApi.call(old==null?"/api/listings":"/api/listings/"+old.getString("id"),old==null?"POST":"PUT",data,token);},result->{saving=false;toast(old==null?"Your goods are listed.":"Listing updated.");showMy();},()->{saving=false;button.setEnabled(true);});}catch(Exception e){error(e.getMessage());}}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==PHOTO_REQUEST&&result==RESULT_OK&&data!=null&&data.getData()!=null){Uri uri=data.getData();try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}photoUri=uri.toString();loadSelectedPhoto(uri);}}
+    private void loadSelectedPhoto(Uri uri){final long version=epoch;photoLoading=true;busy(true);executor.execute(()->{try{BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;try(InputStream input=getContentResolver().openInputStream(uri)){BitmapFactory.decodeStream(input,null,bounds);}if(bounds.outWidth<1||bounds.outHeight<1)throw new IllegalArgumentException("Choose a readable photo.");BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=1;while(Math.max(bounds.outWidth,bounds.outHeight)/options.inSampleSize>1400)options.inSampleSize*=2;Bitmap bitmap;try(InputStream input=getContentResolver().openInputStream(uri)){bitmap=BitmapFactory.decodeStream(input,null,options);}if(bitmap==null)throw new IllegalArgumentException("Choose a readable photo.");
+            int orientation=ExifInterface.ORIENTATION_NORMAL;try(InputStream input=getContentResolver().openInputStream(uri)){orientation=new ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL);}catch(Exception ignored){}Matrix matrix=new Matrix();if(orientation==ExifInterface.ORIENTATION_ROTATE_90)matrix.postRotate(90);else if(orientation==ExifInterface.ORIENTATION_ROTATE_180)matrix.postRotate(180);else if(orientation==ExifInterface.ORIENTATION_ROTATE_270)matrix.postRotate(270);else if(orientation==ExifInterface.ORIENTATION_FLIP_HORIZONTAL)matrix.postScale(-1,1);else if(orientation==ExifInterface.ORIENTATION_FLIP_VERTICAL)matrix.postScale(1,-1);Bitmap rotated=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),bitmap.getHeight(),matrix,true);float ratio=Math.min(1f,1024f/Math.max(rotated.getWidth(),rotated.getHeight()));Bitmap scaled=Bitmap.createScaledBitmap(rotated,Math.max(1,Math.round(rotated.getWidth()*ratio)),Math.max(1,Math.round(rotated.getHeight()*ratio)),true);ByteArrayOutputStream output=new ByteArrayOutputStream();scaled.compress(Bitmap.CompressFormat.JPEG,78,output);byte[] jpeg=output.toByteArray();if(jpeg.length>800_000)throw new IllegalArgumentException("Choose a smaller photo.");
+            ui.post(()->{if(epoch==version&&!isDestroyed()){busy(false);photoLoading=false;photoJpeg=jpeg;selectedPhoto.setImageBitmap(scaled);selectedPhoto.setVisibility(View.VISIBLE);}});
+        }catch(Exception e){ui.post(()->{if(epoch==version){busy(false);photoLoading=false;error("That photo could not be opened. Please choose another.");}});}});}
+    private void openUrl(String value){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(value)));}catch(Exception e){toast("Install a browser to open this link.");}}
+}

@@ -1,0 +1,24 @@
+plugins { id 'com.android.application' }
+
+def apiOrigin = providers.gradleProperty('marketApiOrigin').getOrElse('https://nyazuramusika.shagayabrian899.chatgpt.site')
+if (!apiOrigin.startsWith('https://') || apiOrigin.contains('"')) throw new GradleException('marketApiOrigin must be an HTTPS origin')
+
+android {
+    namespace 'com.nyazuramusika.app'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.nyazuramusika.app'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        buildConfigField 'String', 'MARKET_API_ORIGIN', '"' + apiOrigin.replaceAll('/+$', '') + '"'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes { release { minifyEnabled false } }
+}
+dependencies { testImplementation 'junit:junit:4.13.2' }

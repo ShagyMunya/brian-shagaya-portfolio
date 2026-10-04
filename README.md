@@ -39,3 +39,7 @@ In the repository settings, open Pages, choose deployment from a branch, and sel
 Tickets and tasks are saved only in the visitor browser. The quiz stays in the page session. These demos do not have a shared database, execute submitted code or send data to a server.
 
 The source download includes the HTML, CSS, JavaScript, CV and this README. The ZIP itself is not nested inside its own download.
+
+## NyazuraMusika Android marketplace
+
+[NyazuraMusika](projects/nyazuramusika) is a new native Android project for local goods listings, seller accounts, product photos and WhatsApp contact. It has a separate shared marketplace service. The project README includes build and testing instructions.
