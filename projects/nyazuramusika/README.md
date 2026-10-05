@@ -1,53 +1,41 @@
 # NyazuraMusika
 
-A native Android marketplace for buying and selling goods around Nyazura. Built for local sellers and WhatsApp contact between buyers and sellers.
+A native Android marketplace for buying and selling goods around Nyazura. Built with Java, a Cloudflare Workers service, D1 and R2. Version 1.1 adds Google accounts, server-enforced roles, live inspection, saved goods and EcoCash purchase records.
 
-## What works
+[Download the Android test APK](https://github.com/ShagyMunya/brian-shagaya-portfolio/raw/refs/heads/main/projects/nyazuramusika/downloads/NyazuraMusika.apk)
 
-- Browse shared listings without signing in.
-- Search by goods, category and collection area, with paginated results.
-- Sign in with ChatGPT to open a seller account.
-- Save a public seller name and international WhatsApp number.
-- Choose a product photo using Android's system picker.
-- Post goods with a title, description, price, currency, category, condition and area.
-- Edit your own listings, mark goods as sold, make them available again or remove them.
-- Open a prefilled WhatsApp message to the seller.
+**Activation is still required:** the service is owner-private and Google OAuth credentials are not configured. The APK builds, but Google login and shared marketplace access cannot work until the setup below is completed. Live video needs two-device testing and TURN credentials for networks requiring a relay.
 
-Listings and photos are stored in a shared service rather than on a single phone. No sample listings are published as real goods. USD, ZiG and ZAR are labels for seller-entered prices; the app does not convert currencies or process payments.
+## Account roles
 
-## Download the Android APK
+Every marketplace account signs in with Google. New accounts start as users. Admin access comes from a verified, server-configured owner email on first registration or an existing admin's explicit role change.
 
-[Download NyazuraMusika.apk](downloads/NyazuraMusika.apk?raw=true). This is the compiled debug build for testing.
+| Role | Permissions |
+| --- | --- |
+| User | Browse, save goods, contact sellers, request a private live check, prepare a purchase, submit a payment reference and view own receipts. |
+| Seller | User features plus a public seller profile, own photos and goods, live-check responses, and confirmation of money received for own sales. |
+| Admin | Seller features plus an account and listing dashboard, role assignment, account suspension/restoration and listing moderation. |
 
-The marketplace service is currently an owner-private preview. Public activation is required before local buyers and sellers can reach it from the Android app.
+Roles and suspension are read from the server for each request. Client-side role labels grant no permissions. Admin changes are audited; an admin cannot remove or suspend their own access. Older ChatGPT sessions cannot authenticate the upgraded app.
 
-## Android app
+## Distinctive features
 
-Open `android/` as the project in Android Studio. The app supports Android 8.0 (API 26) and later. Build with JDK 17, Android SDK 36, Android Gradle Plugin 8.13.2 and the supplied Gradle 8.13 wrapper.
+- **See before paying:** a buyer requests a private live video check; the seller accepts and shows the goods through their camera. The buyer confirms their own inspection before preparing a purchase.
+- **Saved goods:** an account-specific shortlist of goods to revisit.
+- **Direct EcoCash handoff:** the purchase records the seller's receiving number, item, exact amount and currency. Android opens the official EcoCash Super App or the dialler for *151#. The buyer completes the transfer within EcoCash.
+- **Transparent payment states:** a buyer-submitted reference stays pending until the seller checks their own wallet and confirms receipt.
+- **Printable records:** buyer and seller can print or save a PDF after seller confirmation. It is labelled “Seller-confirmed payment record” and states that EcoCash has not independently verified it.
 
-```sh
-cd android
-./gradlew testDebugUnitTest assembleDebug
-```
+NyazuraMusika never requests an EcoCash PIN, transfers funds, holds a balance or reads SMS messages. There is no automatic peer-to-peer API integration in this build. Automated transfers and provider-verified receipts require EcoCash's approved API contract, developer credentials and a supported settlement route directly to each seller. Paynow's merchant collection flow must not be described as arbitrary wallet-to-wallet transfer.
 
-On Windows, run `gradlew.bat testDebugUnitTest assembleDebug` in the `android` directory.
+## Run and configure
 
-The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. The repository's **Build NyazuraMusika Android** GitHub Actions workflow creates an APK artifact too. A debug APK is suitable for testing; a Play Store release needs your own signing key and release preparation.
+See [setup and activation](docs/SETUP.md), [build instructions](docs/BUILD.md) and [API contract](docs/API.md).
 
-The configured marketplace origin is `https://nyazuramusika.shagayabrian899.chatgpt.site`. To use a different HTTPS service, build with `-PmarketApiOrigin=https://your-service.example`.
+The service requires D1 `DB`, R2 `BUCKET` and all generated migrations. Google secrets belong on the server, never in the Android APK or GitHub. The app asks only for internet permission; the browser asks for camera/microphone permission when joining a live check.
 
-## Seller sign-in
+## Validation and limitations
 
-The Android app opens the system browser for ChatGPT sign-in. After signing in, tap **Return to NyazuraMusika** and finish your public seller profile. Buyers do not need accounts.
+Automated checks cover Google signatures and claims, OAuth replay protection, native PKCE, roles, suspension, ownership, private call access, exact prices, duplicate purchase protection and receipt states. Android builds and price/phone tests run in GitHub Actions. The Google provider handoff, actual two-phone video, EcoCash app handoff and print dialog still need physical-device testing after configuration. No real financial transaction was made during development.
 
-The handoff uses a two-minute, single-use authorization code bound to an app-generated PKCE verifier and state. App bearer sessions expire after 30 days, are stored encrypted with Android Keystore, and are revoked server-side when sign-out reaches the service. The app does not contain a service credential, password, API secret or signing key.
-
-## Shared service
-
-`service/` contains the marketplace API, D1 schema and migrations, R2 photo storage, and the browser sign-in return page. The server checks ownership for every listing change and photo attachment. Queries use prepared statements, money is stored as integer minor units, request bodies have size limits, and writes are rate limited.
-
-This service uses Sites' dispatch-owned ChatGPT identity headers. Do not expose an untrusted proxy that lets clients set those headers. A self-hosted fork must replace that integration with a verified identity provider rather than trusting arbitrary header values.
-
-## First version
-
-This is an initial marketplace implementation created with AI assistance. It arranges purchases through WhatsApp and does not include checkout, delivery tracking, seller verification, ratings, automatic password recovery or an operator moderation dashboard. Test the complete sign-in and posting flow on your Android device before inviting sellers. Listing removal hides goods from the market; account and stored-photo deletion currently requires the project owner.
+This is an early version built with AI assistance. Live-check inboxes refresh manually. Buyer inspection is the buyer's own statement; seller payment confirmation is the seller's own statement. Listings, records and stored photos remain until removed or cleaned up by the owner. Use the original EcoCash confirmation as the authoritative payment evidence.

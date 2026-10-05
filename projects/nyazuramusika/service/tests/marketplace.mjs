@@ -2,24 +2,30 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, mkdir, writeFile, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import { SignJWT, generateKeyPair, createLocalJWKSet, exportJWK } from 'jose';
 
 const requireWrangler=createRequire(await realpath(new URL('../node_modules/wrangler/package.json',import.meta.url)));
 const { Miniflare }=requireWrangler('miniflare');
 await mkdir(new URL('../.sites-runtime/',import.meta.url),{recursive:true});
 const source=await readFile(new URL('../lib/marketplace.ts',import.meta.url),'utf8');
-const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace('"./google-auth"','"./google-auth-test.mjs"');
 await writeFile(new URL('../.sites-runtime/marketplace-test.mjs',import.meta.url),compiled);
+const googleSource=await readFile(new URL('../lib/google-auth.ts',import.meta.url),'utf8');
+await writeFile(new URL('../.sites-runtime/google-auth-test.mjs',import.meta.url),ts.transpileModule(googleSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
 const { handleMarketRequest,issueAuthCode,hash }=await import('../.sites-runtime/marketplace-test.mjs');
+const { verifyGoogleIdentity }=await import('../.sites-runtime/google-auth-test.mjs');
 const mf=new Miniflare({modules:true,script:"export default { fetch(){return new Response('test')} }",compatibilityDate:'2026-05-15',d1Databases:['DB'],r2Buckets:['BUCKET']});
 let checks=0;
 try {
-  const DB=await mf.getD1Database('DB'),BUCKET=await mf.getR2Bucket('BUCKET'),env={DB,BUCKET};
+  const DB=await mf.getD1Database('DB'),BUCKET=await mf.getR2Bucket('BUCKET'),env={DB,BUCKET,GOOGLE_CLIENT_ID:'test.apps.googleusercontent.com',GOOGLE_CLIENT_SECRET:'local-test-only',MARKET_ORIGIN:'https://market.test',ADMIN_GOOGLE_EMAILS:'owner@gmail.com'};
   for(const file of (await readdir(new URL('../drizzle/',import.meta.url))).filter(n=>n.endsWith('.sql')).sort()) {
     const sql=await readFile(new URL('../drizzle/'+file,import.meta.url),'utf8');
     for(const statement of sql.split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))await DB.prepare(statement).run();
   }
+  let readToken;
   async function api(path,method='GET',data,token,headers={}) {
     const init={method,headers:{...headers}};
+    if(token===undefined&&method==='GET'&&(path.startsWith('listings')||path.startsWith('images/')))token=readToken;
     if(token)init.headers.authorization='Bearer '+token;
     if(data!==undefined){init.headers['content-type']='application/json';init.body=JSON.stringify(data);}
     const response=await handleMarketRequest(new Request('https://market.test/api/'+path,init),env);
@@ -28,7 +34,7 @@ try {
   function expect(value,target){assert.equal(value,target);checks++;}
   const verifier='v'.repeat(43),state='s'.repeat(32);
   async function account(external) {
-    const code=await issueAuthCode(env,external,await hash(verifier),state);
+    const code=await issueAuthCode(env,{sub:external,email:external==='owner'?'owner@gmail.com':external+'@gmail.com',name:external,authoritativeEmail:true},await hash(verifier),state);
     expect((await api('auth/exchange','POST',{code,verifier:'x'.repeat(43),state})).status,401);
     expect((await api('auth/exchange','POST',{code,verifier,state:'w'.repeat(32)})).status,401);
     const result=await api('auth/exchange','POST',{code,verifier,state});expect(result.status,200);
@@ -39,10 +45,13 @@ try {
   expect((await api('listings','POST',{})).status,401);
   expect((await api('me','GET',undefined,undefined,{'oai-authenticated-user-id':'attacker','oai-authenticated-user-email':'attacker@example.test'})).status,401);
   const alice=await account('test-alice'),bob=await account('test-bob');
-  expect((await api('listings','POST',{},alice.token)).status,400);
+  readToken=alice.token;
+  expect(alice.account.role,'user');expect(bob.account.role,'user');
+  expect((await api('listings','GET',undefined,null)).status,401);
+  expect((await api('listings','POST',{},alice.token)).status,403);
   expect((await api('me','PUT',{display_name:'Alice',whatsapp:'0771234567'},alice.token)).status,400);
-  expect((await api('me','PUT',{display_name:'Alice',whatsapp:'+263 77 123 4567'},alice.token)).status,200);
-  expect((await api('me','PUT',{display_name:'Bob',whatsapp:'+263771234568'},bob.token)).status,200);
+  expect((await api('me/seller','POST',{display_name:'Alice',whatsapp:'+263 77 123 4567'},alice.token)).status,200);
+  expect((await api('me/seller','POST',{display_name:'Bob',whatsapp:'+263771234568'},bob.token)).status,200);
   const photo=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jM1sAAAAASUVORK5CYII=','base64'));
   const uploaded=await handleMarketRequest(new Request('https://market.test/api/images',{method:'POST',headers:{authorization:'Bearer '+alice.token,'content-type':'image/png'},body:photo}),env);
   expect(uploaded.status,201);const image=(await uploaded.json()).image_id;
@@ -76,5 +85,99 @@ try {
   expect((await api('listings','POST',{...listing,image_id:null},alice.token)).status,429);
   expect((await api('auth/logout','POST',undefined,bob.token)).status,200);expect((await api('me','GET',undefined,bob.token)).status,401);
   const down=await handleMarketRequest(new Request('https://market.test/api/listings'),{DB:null,BUCKET:null});expect(down.status,503);
-  console.log(JSON.stringify({checks,result:'passed',coverage:'PKCE, replay, sessions, profiles, image ownership, listing ownership, exact prices, filters, pagination, sold and removed states, body limits, rate limits, storage errors'}));
+  // Google ID tokens: cryptographic verification, binding and private bootstrap roles.
+  const {privateKey,publicKey}=await generateKeyPair('RS256'),jwk=await exportJWK(publicKey);jwk.kid='local-test';
+  const resolver=createLocalJWKSet({keys:[jwk]});
+  async function signedClaims(overrides={}){return new SignJWT({sub:'google-test',email:'owner@gmail.com',email_verified:true,nonce:'expected-nonce',name:'Owner',...overrides}).setProtectedHeader({alg:'RS256',kid:'local-test'}).setIssuer('https://accounts.google.com').setAudience(env.GOOGLE_CLIENT_ID).setIssuedAt().setExpirationTime('5m').sign(privateKey);}
+  const goodJwt=await signedClaims();expect((await verifyGoogleIdentity(goodJwt,env.GOOGLE_CLIENT_ID,'expected-nonce',resolver)).sub,'google-test');
+  for(const changes of [{nonce:'wrong'},{email_verified:false},{azp:'another-client'},{sub:''}]){await assert.rejects(()=>signedClaims(changes).then(jwt=>verifyGoogleIdentity(jwt,env.GOOGLE_CLIENT_ID,'expected-nonce',resolver)));checks++;}
+  await assert.rejects(()=>verifyGoogleIdentity(goodJwt,'wrong-client','expected-nonce',resolver));checks++;
+  const expired=await new SignJWT({sub:'expired',email:'a@gmail.com',email_verified:true,nonce:'expected-nonce'}).setProtectedHeader({alg:'RS256',kid:'local-test'}).setIssuer('https://accounts.google.com').setAudience(env.GOOGLE_CLIENT_ID).setIssuedAt().setExpirationTime(Math.floor(Date.now()/1000)-100).sign(privateKey);
+  await assert.rejects(()=>verifyGoogleIdentity(expired,env.GOOGLE_CLIENT_ID,'expected-nonce',resolver));checks++;
+  const badIssuer=await new SignJWT({sub:'fake',email:'a@gmail.com',email_verified:true,nonce:'expected-nonce'}).setProtectedHeader({alg:'RS256',kid:'local-test'}).setIssuer('https://attacker.test').setAudience(env.GOOGLE_CLIENT_ID).setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  await assert.rejects(()=>verifyGoogleIdentity(badIssuer,env.GOOGLE_CLIENT_ID,'expected-nonce',resolver));checks++;
+  const {privateKey:foreignKey}=await generateKeyPair('RS256');const forged=await new SignJWT({sub:'fake',email:'owner@gmail.com',email_verified:true,nonce:'expected-nonce'}).setProtectedHeader({alg:'RS256',kid:'local-test'}).setIssuer('https://accounts.google.com').setAudience(env.GOOGLE_CLIENT_ID).setIssuedAt().setExpirationTime('5m').sign(foreignKey);
+  await assert.rejects(()=>verifyGoogleIdentity(forged,env.GOOGLE_CLIENT_ID,'expected-nonce',resolver));checks++;
+  expect((await api('auth/config')).data.configured,true);
+  const disabled=await handleMarketRequest(new Request('https://market.test/api/auth/config'),{DB,BUCKET});expect((await disabled.json()).configured,false);
+  const start=await handleMarketRequest(new Request('https://market.test/api/auth/google/start?challenge='+await hash(verifier)+'&state='+state),env);expect(start.status,302);
+  const googleUrl=new URL(start.headers.get('location'));expect(googleUrl.origin,'https://accounts.google.com');expect(googleUrl.searchParams.get('redirect_uri'),'https://market.test/api/auth/google/callback');expect(googleUrl.searchParams.get('code_challenge_method'),'S256');
+  const oauthState=googleUrl.searchParams.get('state'),cookie=start.headers.get('set-cookie').split(';')[0];
+  const wrongBrowser=await handleMarketRequest(new Request('https://market.test/api/auth/google/callback?state='+oauthState+'&error=access_denied',{headers:{cookie:'__Host-nyazura-google='+'x'.repeat(43)}}),env);expect(wrongBrowser.status,401);
+  const cancelled=await handleMarketRequest(new Request('https://market.test/api/auth/google/callback?state='+oauthState+'&error=access_denied',{headers:{cookie}}),env);expect(cancelled.status,403);
+  expect((await handleMarketRequest(new Request('https://market.test/api/auth/google/callback?state='+oauthState+'&error=access_denied',{headers:{cookie}}),env)).status,401);
+  const owner=await account('owner'),buyer=await account('buyer'),outsider=await account('outsider'),seller2=await account('test-bob');expect(owner.account.role,'admin');
+  expect((await api('admin/overview','GET',undefined,buyer.token)).status,403);expect((await api('admin/overview','GET',undefined,seller2.token)).status,403);
+  expect((await api('admin/accounts/'+buyer.account.id,'PUT',{role:'admin'},buyer.token)).status,403);
+  expect((await api('me','PUT',{display_name:'Buyer',whatsapp:'',role:'admin'},buyer.token)).status,403);
+  expect((await api('me/seller','POST',{display_name:'Buyer',whatsapp:'+263771234569',role:'admin'},buyer.token)).status,403);
+  expect((await api('admin/accounts/'+owner.account.id,'PUT',{role:'user'},owner.token)).status,400);
+  expect((await api('admin/accounts/'+owner.account.id,'PUT',{account_status:'suspended'},owner.token)).status,400);
+  expect((await api('admin/accounts/'+seller2.account.id,'PUT',{role:'user'},owner.token)).status,200);expect((await api('me','GET',undefined,seller2.token)).data.account.role,'user');expect((await api('images','POST',{},seller2.token)).status,403);
+  expect((await account('test-bob')).account.role,'user');
+  expect((await api('admin/accounts/'+seller2.account.id,'PUT',{role:'seller'},owner.token)).status,200);
+  expect((await api('admin/listings/'+next.data.id,'PUT',{status:'removed'},owner.token)).status,200);expect((await api('listings/'+next.data.id,'GET',undefined,buyer.token)).status,404);
+  expect((await api('admin/listings/'+next.data.id,'PUT',{status:'active'},owner.token)).status,200);
+  expect((await api('me','PUT',{display_name:'Alice',whatsapp:'+263771234567',ecocash_phone:'+263771234567'},alice.token)).status,200);
+  expect((await api('me','PUT',{display_name:'Alice',whatsapp:'+263771234567',ecocash_phone:'+27712345678'},alice.token)).status,400);
+  expect((await api('me','PUT',{display_name:'Alice',whatsapp:'+263771234567',pin:'0000'},alice.token)).status,400);
+  expect((await api('favorites/'+next.data.id,'POST',undefined,buyer.token)).status,200);expect((await api('favorites/'+next.data.id,'POST',undefined,buyer.token)).status,200);
+  expect((await api('favorites','GET',undefined,buyer.token)).data.listings.length,1);expect((await api('favorites','GET',undefined,outsider.token)).data.listings.length,0);
+  expect((await api('favorites/'+next.data.id,'DELETE',undefined,buyer.token)).status,200);
+  const requested=await api('live-checks','POST',{listing_id:next.data.id},buyer.token);expect(requested.status,201);const liveId=requested.data.id;
+  expect((await api('live-checks','POST',{listing_id:next.data.id},buyer.token)).data.id,liveId);
+  expect((await api('live-checks/'+liveId+'/state','GET',undefined,outsider.token)).status,404);
+  expect((await api('live-checks/'+liveId+'/respond','POST',{status:'accepted'},buyer.token)).status,403);
+  expect((await api('live-checks/'+liveId+'/respond','POST',{status:'accepted'},alice.token)).status,200);
+  expect((await api('live-checks/'+liveId+'/complete','POST',undefined,buyer.token)).status,409);
+  const ticket=await api('live-checks/'+liveId+'/ticket','POST',undefined,buyer.token);expect(ticket.status,200);
+  const browserOpen=await handleMarketRequest(new Request(ticket.data.url),env);expect(browserOpen.status,302);expect(browserOpen.headers.get('location'),'/live-check/'+liveId);
+  expect((await handleMarketRequest(new Request(ticket.data.url),env)).status,401);
+  const liveCookie=browserOpen.headers.get('set-cookie').split(';')[0];
+  expect((await api('live-checks/'+liveId+'/state','GET',undefined,undefined,{cookie:liveCookie})).status,200);
+  expect((await api('me','GET',undefined,undefined,{cookie:liveCookie})).status,401);
+  expect((await api('live-checks/'+liveId+'/signals','POST',{type:'ice',candidate:{candidate:'test'}},undefined,{cookie:liveCookie,origin:'https://attacker.test'})).status,403);
+  expect((await api('live-checks/'+liveId+'/signals','POST',{type:'offer',sdp:'v=0\r\nThis is a local test offer'},alice.token)).status,403);
+  expect((await api('live-checks/'+liveId+'/signals','POST',{type:'offer',sdp:'v=0\r\nThis is a local test offer'},buyer.token)).status,200);
+  expect((await api('live-checks/'+liveId+'/signals','POST',{type:'answer',sdp:'v=0\r\nThis is a local test answer'},alice.token)).status,200);
+  expect((await api('live-checks/'+liveId+'/signals','POST',{type:'ice',candidate:{candidate:'candidate:test',sdpMid:'0',sdpMLineIndex:0}},buyer.token)).status,200);
+  expect((await api('live-checks/'+liveId+'/state','GET',undefined,alice.token)).data.candidates.length,1);
+  expect((await api('live-checks/'+liveId+'/complete','POST',undefined,alice.token)).status,403);
+  expect((await api('live-checks/'+liveId+'/complete','POST',undefined,buyer.token)).status,200);
+  const purchase={live_check_id:liveId,client_request_id:crypto.randomUUID(),expected_price_minor:1999,expected_currency:'USD'};
+  expect((await api('orders','POST',{...purchase,pin:'0000'},buyer.token)).status,400);
+  expect((await api('orders','POST',{...purchase,expected_price_minor:100},buyer.token)).status,409);
+  const order=await api('orders','POST',purchase,buyer.token);expect(order.status,201);const orderId=order.data.order.id;expect(order.data.order.provider_verified,false);
+  expect((await api('orders','POST',purchase,buyer.token)).data.order.id,orderId);
+  expect((await api('orders/'+orderId,'GET',undefined,outsider.token)).status,404);
+  expect((await api('orders/'+orderId+'/receipt','GET',undefined,buyer.token)).status,409);
+  expect((await api('orders/'+orderId+'/report','POST',{payment_reference:'EC-LOCAL-TEST'},alice.token)).status,403);
+  expect((await api('orders/'+orderId+'/report','POST',{payment_reference:'EC-LOCAL-TEST'},buyer.token)).data.payment_state,'buyer_reported');
+  expect((await api('orders/'+orderId+'/receipt','GET',undefined,buyer.token)).status,409);
+  expect((await api('orders/'+orderId+'/confirm','POST',{checked_wallet:true},buyer.token)).status,403);
+  expect((await api('orders/'+orderId+'/confirm','POST',{},alice.token)).status,400);
+  expect((await api('orders/'+orderId+'/confirm','POST',{checked_wallet:true},alice.token)).data.payment_state,'seller_confirmed');
+  const receipt=await api('orders/'+orderId+'/receipt','GET',undefined,buyer.token);expect(receipt.status,200);expect(receipt.data.receipt.provider_verified,false);expect(receipt.data.receipt.title_label,'Seller-confirmed payment record');expect(receipt.data.receipt.price_minor,1999);
+  expect((await api('listings/'+next.data.id,'GET',undefined,buyer.token)).data.listing.status,'sold');
+  expect((await api('orders/'+orderId+'/report','POST',{payment_reference:'replace'},buyer.token)).status,409);expect((await api('orders/'+orderId+'/cancel','POST',undefined,buyer.token)).status,409);
+  expect((await api('orders','POST',purchase,buyer.token)).data.order.id,orderId); // Repeating a purchase cannot create or charge again, even after goods are sold.
+  expect((await api('admin/listings/'+next.data.id,'PUT',{status:'active'},owner.token)).status,200);
+  const secondCheck=(await api('live-checks','POST',{listing_id:next.data.id},outsider.token)).data.id;
+  expect((await api('live-checks/'+secondCheck+'/state','GET',undefined,undefined,{cookie:liveCookie})).status,401);
+  await api('live-checks/'+secondCheck+'/respond','POST',{status:'accepted'},alice.token);
+  await api('live-checks/'+secondCheck+'/signals','POST',{type:'offer',sdp:'v=0\r\nSecond local offer'},outsider.token);
+  await api('live-checks/'+secondCheck+'/signals','POST',{type:'answer',sdp:'v=0\r\nSecond local answer'},alice.token);
+  await api('live-checks/'+secondCheck+'/complete','POST',undefined,outsider.token);
+  const secondOrder=(await api('orders','POST',{...purchase,live_check_id:secondCheck,client_request_id:crypto.randomUUID()},outsider.token)).data.order.id;
+  await api('orders/'+secondOrder+'/report','POST',{payment_reference:'EC-LOCAL-TEST'},outsider.token);
+  expect((await api('orders/'+secondOrder+'/confirm','POST',{checked_wallet:true},alice.token)).status,409);
+  expect((await api('orders/'+secondOrder+'/receipt','GET',undefined,outsider.token)).status,409);
+  const pending=await issueAuthCode(env,{sub:'test-alice',email:'test-alice@gmail.com',name:'Alice',authoritativeEmail:true},await hash(verifier),state);
+  expect((await api('admin/accounts/'+alice.account.id,'PUT',{account_status:'suspended'},owner.token)).status,200);
+  expect((await api('me','GET',undefined,alice.token)).status,401);expect((await api('auth/exchange','POST',{code:pending,verifier,state})).status,401);
+  await assert.rejects(async()=>issueAuthCode(env,{sub:'test-alice',email:'test-alice@gmail.com',name:'Alice',authoritativeEmail:true},await hash(verifier),state));checks++;
+  expect((await api('admin/accounts/'+alice.account.id,'PUT',{account_status:'active'},owner.token)).status,200);expect((await api('me','GET',undefined,alice.token)).status,401);
+  const newAlice=await account('test-alice');expect(newAlice.account.role,'seller');
+  const audit=await DB.prepare('SELECT COUNT(*) AS count FROM admin_actions').first();assert.ok(audit.count>=6);checks++;
+  console.log(JSON.stringify({checks,result:'passed',coverage:'Google JWT signatures and claims; OAuth cookies and replay; native PKCE; live server roles; suspension; ownership; images; exact prices; favorites; private live checks; scoped browser tickets; payment claims; honest receipts; audit records'}));
 } finally { await mf.dispose(); }

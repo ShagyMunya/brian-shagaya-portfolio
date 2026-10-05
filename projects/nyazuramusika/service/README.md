@@ -1,19 +1,13 @@
-# NyazuraMusika shared service
+# NyazuraMusika service
 
-The Android marketplace API uses Cloudflare D1 for seller profiles, authorization codes, expiring app sessions and listings, and R2 for product photos. The database starts empty; no test listings are deployed.
+Cloudflare Workers / Vinext service for the NyazuraMusika Android marketplace. D1 stores Google accounts, roles, sessions, goods, private live-check signaling and purchase records. R2 stores seller-selected product photos.
 
-`lib/marketplace.ts` implements the API. `db/schema.ts` and the generated `drizzle/` files define the schema. `app/android/connect/page.tsx` handles the return from dispatch-owned ChatGPT sign-in.
+Use the retained pnpm lockfile. Configure logical bindings `DB` and `BUCKET` and apply all Drizzle migrations in order. Run `pnpm exec tsc --noEmit`, `node tests/marketplace.mjs` and `pnpm build`.
 
-## Local development and verification
+Runtime variables: `MARKET_ORIGIN`, `GOOGLE_CLIENT_ID`, secret `GOOGLE_CLIENT_SECRET`, and `ADMIN_GOOGLE_EMAILS`. Optional relay variables: `TURN_KEY_ID` and secret `TURN_API_TOKEN`. Secrets stay on the server. New Google accounts are users; seller registration and admin changes are enforced by the service. Existing ChatGPT accounts are retained but excluded from Google authentication and listings.
 
-Use Node 22.13 or later and the supplied pnpm lockfile. Install dependencies with `node scripts/install-ci.mjs`, then generate migrations with `pnpm db:generate` when the schema changes. Run `node tests/marketplace.mjs` for integration checks and `pnpm build` to build the Worker. The integration tests use isolated local D1 and R2 storage; they do not write production goods or accounts.
+Google setup and public service activation are required for Android access. The current service audience remains owner-private. Private live calls use browser cookies restricted to one room; they cannot authenticate other routes. The backend verifies Google token signatures/claims and native PKCE before creating an app session.
 
-The browser sign-in page requires Sites dispatch-owned identity headers. Local API tests call the internal code-issuance helper to represent authenticated identities; this helper is never an anonymous HTTP endpoint. A self-hosted fork must supply a verified identity integration before exposing that page.
+EcoCash functionality is a direct external-app/USSD handoff plus purchase records. No PIN is requested, no funds are sent or held, and no automatic wallet-to-wallet integration is connected. Receipts are seller-confirmed records, labelled as not independently verified by EcoCash. Automated transfer support requires the provider's approved API contract and credentials.
 
-## Deployment
-
-The exported `.openai/hosting.json` declares only logical DB and BUCKET bindings. It contains no existing Site identity or credentials. Register a separate Site for a fork and let Sites provision its bindings and apply the checked-in migrations. Browser-owned authentication does not require an app password database.
-
-The original marketplace service is deployed as an owner-private preview. Public access is a separate activation step so Android buyers can reach public read endpoints without an owner session. Do not put a private Sites service credential in the APK to bypass that boundary.
-
-Applied migration files and their matching metadata must remain immutable; create additional migrations for future changes.
+Complete project setup and API documentation are in the parent project's `docs/` directory on GitHub.

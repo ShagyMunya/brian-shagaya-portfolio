@@ -1,8 +1,12 @@
 export default function Privacy() {
   return <main><p className="eyebrow">NYAZURAMUSIKA</p><h1>Privacy and your listings</h1>
     <p>Your seller name, WhatsApp number, area, product description and product photo are public when you post a listing. Use an area name rather than your exact home address.</p>
-    <p>Sign-in is handled by ChatGPT. NyazuraMusika stores a site-specific account identifier, your seller profile, listings, photos and expiring app sessions. It does not receive your ChatGPT password or chat history.</p>
+    <p>Sign-in is handled by Google. NyazuraMusika stores your Google account identifier, verified email, display name, account role, account status, seller profile, listings, photos and expiring app sessions. It does not receive your Google password, mail or files.</p>
+    <p>Your Google email is visible to you and marketplace admins. It is not shown on listings. Admins can change account roles, suspend or restore accounts, and remove or restore listings. These actions are recorded.</p>
     <p>The Android app keeps its session encrypted using Android Keystore. It requests internet access and reads only photos you choose using the system picker.</p>
     <p>You can edit or remove listings in My listings. Removed listings disappear from the market; stored photos and account records are retained until the app owner removes them. Contact the project owner through the GitHub repository for deletion requests.</p>
-    <p>WhatsApp opens as a separate service when you contact a seller. NyazuraMusika does not process payments or track messages exchanged there.</p><a className="quiet" href="/">Back to NyazuraMusika</a></main>;
+    <p>Live checks use your browser’s camera and microphone after you choose to join. Only the buyer and seller can access that check. NyazuraMusika stores temporary connection details, requests and the buyer’s inspection confirmation; it does not record the video or audio. Connection details are cleared after expiry when requests are next refreshed.</p>
+    <p>Saved goods and purchase records belong to your account. A purchase stores the item, amount, currency, receiving EcoCash number, buyer and seller names, submitted transaction reference and seller confirmation. These records are visible to the buyer and seller. Receiving numbers on existing records stay the same if a seller later changes their profile.</p>
+    <p>EcoCash opens as a separate service. NyazuraMusika never asks for your EcoCash PIN, does not transfer or hold money, and cannot independently verify these direct transfers. Printed records are clearly labelled as seller-confirmed. Keep the original EcoCash confirmation.</p>
+    <p>WhatsApp opens separately when you contact a seller. NyazuraMusika does not read messages exchanged there.</p><a className="quiet" href="/">Back to NyazuraMusika</a></main>;
 }

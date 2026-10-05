@@ -8,6 +8,27 @@
       "when": 1791142980876,
       "tag": "0000_wandering_ronan",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791178594313,
+      "tag": "0001_fantastic_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791179267461,
+      "tag": "0002_empty_absorbing_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791179664995,
+      "tag": "0003_acoustic_nomad",
+      "breakpoints": true
     }
   ]
 }

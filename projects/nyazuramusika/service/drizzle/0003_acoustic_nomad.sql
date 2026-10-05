@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `idx_orders_confirmed_reference` ON `orders` (`payee_phone`,`payment_reference`) WHERE payment_state='seller_confirmed';
