@@ -39,7 +39,7 @@ final class MarketApi {
             int status=connection.getResponseCode();
             if(status<200||status>=300) {
                 String message=status==401?"Your session has expired. Please sign in again.":"The marketplace is unavailable. Please try again.";
-                try { message=new JSONObject(new String(read(connection.getErrorStream(),64_000),StandardCharsets.UTF_8)).optString("error",message); }catch(Exception ignored){}
+                try { JSONObject response=new JSONObject(new String(read(connection.getErrorStream(),64_000),StandardCharsets.UTF_8));String detail=response.optString("error",response.optString("detail",message));if(!detail.isEmpty())message=detail; }catch(Exception ignored){}
                 throw new ApiException(status,message);
             }
             return read(connection.getInputStream(),limit);
