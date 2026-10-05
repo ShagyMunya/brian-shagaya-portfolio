@@ -31,14 +31,15 @@ final class ReceiptPrinter {
             }
             @Override public void onWrite(PageRange[] pages,ParcelFileDescriptor destination,CancellationSignal cancellation,WriteResultCallback callback){
                 if(cancellation.isCanceled()){callback.onWriteCancelled();return;}
-                try(PdfDocument pdf=new PdfDocument()){
+                PdfDocument pdf=new PdfDocument();
+                try{
                     PdfDocument.Page page=pdf.startPage(new PdfDocument.PageInfo.Builder(595,842,1).create());Canvas canvas=page.getCanvas();Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setColor(Color.rgb(20,39,56));paint.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));paint.setTextSize(26);canvas.drawText("NyazuraMusika",36,55,paint);
                     paint.setTextSize(18);canvas.drawText("Seller-confirmed payment record",36,90,paint);paint.setTypeface(Typeface.DEFAULT);paint.setTextSize(13);
                     String time=new SimpleDateFormat("dd MMM yyyy HH:mm z",Locale.getDefault()).format(new Date(record.optLong("confirmed_at")));
                     String[] rows={"Receipt: "+record.optString("receipt_number"),"Confirmed: "+time,"Item: "+record.optString("title"),"Amount: "+MarketRules.price(record.optLong("price_minor"),record.optString("currency")),"Buyer: "+record.optString("buyer_name"),"Seller: "+record.optString("seller_name"),"EcoCash recipient: "+record.optString("payee_phone"),"EcoCash reference: "+record.optString("payment_reference"),"Method: EcoCash direct transfer","Purchase ID: "+record.optString("id"),"","Confirmed by the seller; not independently verified by EcoCash.","NyazuraMusika did not transfer or hold the funds.","Keep your original EcoCash transaction confirmation."};
                     float y=125;for(String row:rows){String remaining=row.replace('\n',' ').replace('\r',' ');if(remaining.isEmpty()){y+=20;continue;}while(!remaining.isEmpty()){int count=paint.breakText(remaining,true,523,null);if(count<1)break;canvas.drawText(remaining.substring(0,count),36,y,paint);remaining=remaining.substring(count);y+=20;}y+=7;}
                     pdf.finishPage(page);if(cancellation.isCanceled()){callback.onWriteCancelled();return;}try(FileOutputStream output=new FileOutputStream(destination.getFileDescriptor())){pdf.writeTo(output);}callback.onWriteFinished(new PageRange[]{new PageRange(0,0)});
-                }catch(Exception error){callback.onWriteFailed("The receipt could not be printed. Please try again.");}
+                }catch(Exception error){callback.onWriteFailed("The receipt could not be printed. Please try again.");}finally{pdf.close();}
             }
         },new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).setColorMode(PrintAttributes.COLOR_MODE_COLOR).build());
     }
