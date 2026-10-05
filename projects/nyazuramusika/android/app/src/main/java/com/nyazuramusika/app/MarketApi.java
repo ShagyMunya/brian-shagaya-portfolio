@@ -52,5 +52,5 @@ final class MarketApi {
     static String upload(byte[] jpeg,String token) throws Exception {
         return new JSONObject(new String(request("/api/images","POST",jpeg,"image/jpeg",token,64_000),StandardCharsets.UTF_8)).getString("image_id");
     }
-    static byte[] photo(String path) throws Exception { return request(path,"GET",null,null,null,800_000); }
+    static byte[] photo(String path,String token) throws Exception { return request(path,"GET",null,null,token,800_000); }
 }

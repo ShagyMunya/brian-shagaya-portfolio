@@ -38,5 +38,5 @@ final class SecureSession {
         } catch(Exception error) { remove(name); return ""; }
     }
     void remove(String name) { preferences.edit().remove(name).apply(); }
-    void clearAccount() { remove("token");remove("seller");remove("verifier");remove("state");remove("started"); }
+    void clearAccount() { remove("token");remove("seller");remove("verifier");remove("state");remove("started");remove("after"); }
 }

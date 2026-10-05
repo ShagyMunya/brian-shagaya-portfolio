@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <queries><package android:name="com.ecocash.superapp" /></queries>
     <application android:label="NyazuraMusika" android:theme="@style/AppTheme"
         android:icon="@drawable/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false"
         android:supportsRtl="true">
@@ -15,6 +16,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="nyazuramusika" android:host="auth" />
+                <data android:scheme="nyazuramusika" android:host="home" />
             </intent-filter>
         </activity>
     </application>
