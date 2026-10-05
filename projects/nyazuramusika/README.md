@@ -4,7 +4,7 @@ A native Android marketplace for buying and selling goods around Nyazura. Built 
 
 [Download the Android test APK](https://github.com/ShagyMunya/brian-shagaya-portfolio/raw/refs/heads/main/projects/nyazuramusika/downloads/NyazuraMusika.apk)
 
-**Activation is still required:** the service is owner-private and Google OAuth credentials are not configured. The APK builds, but Google login and shared marketplace access cannot work until the setup below is completed. Live video needs two-device testing and TURN credentials for networks requiring a relay.
+**Current deployment:** the shared service is public and Google OAuth credentials are configured on the server as of 5 October 2026. Start sign-in from the Android app's **Sign in with Google** button. A complete Google account login and return to Android still need device testing; an automated browser could not open the site. Live video needs two-device testing and TURN credentials for networks requiring a relay.
 
 ## Account roles
 

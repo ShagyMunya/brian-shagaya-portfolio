@@ -2,9 +2,11 @@
 
 ## 1. Make the service reachable
 
-The existing shared service is deployed at `https://nyazuramusika.shagayabrian899.chatgpt.site` and is currently owner-private. The owner must request public access for the Android app and other Google users to reach it. Making the service public does not remove app authentication: marketplace reads and writes still require a valid Google-backed app session.
+The existing shared service is deployed at `https://nyazuramusika.shagayabrian899.chatgpt.site` and is public. Marketplace reads and writes still require a valid Google-backed app session. Google credentials were configured and the service was successfully redeployed on 5 October 2026.
 
 ## 2. Connect Google
+
+**Existing deployment:** its Google client ID and protected client secret are configured. A complete Google account login and Android return still require device testing. Start from **Sign in with Google** in the Android app; the callback URL below is registered in Google Cloud and is not a standalone login page. The steps below describe configuration for another deployment or a replacement Google client.
 
 Create a Google Cloud project or select your existing project. Configure Google Auth Platform branding and the audience, then create an OAuth client of type **Web application**. This app uses a browser-to-server Google flow followed by a separate PKCE-protected handoff into Android.
 

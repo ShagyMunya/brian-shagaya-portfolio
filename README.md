@@ -42,4 +42,4 @@ The source download includes the HTML, CSS, JavaScript, CV and this README. The 
 
 ## NyazuraMusika Android marketplace
 
-[NyazuraMusika](projects/nyazuramusika) is a native Android marketplace with Google accounts, admin/user/seller roles, saved goods, private live inspections, product photos and WhatsApp contact. It includes a direct EcoCash app handoff and printable seller-confirmed payment records. Google setup and service activation are still required; the project README includes the current setup, build and testing instructions.
+[NyazuraMusika](projects/nyazuramusika) is a native Android marketplace with Google accounts, admin/user/seller roles, saved goods, private live inspections, product photos and WhatsApp contact. It includes a direct EcoCash app handoff and printable seller-confirmed payment records. The shared service is public and Google credentials are configured on the server. Full Google login and Android return still need device testing; the project README includes the current setup, build and testing instructions.
