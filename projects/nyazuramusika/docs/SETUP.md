@@ -6,7 +6,7 @@ The existing shared service is deployed at `https://nyazuramusika.shagayabrian89
 
 ## 2. Connect Google
 
-**Existing deployment:** its Google client ID and protected client secret are configured. A complete Google account login and Android return still require device testing. Start from **Sign in with Google** in the Android app; the callback URL below is registered in Google Cloud and is not a standalone login page. The steps below describe configuration for another deployment or a replacement Google client.
+**Existing deployment:** its Google client ID and protected client secret are configured. Google login has been confirmed for the owner account; additional accounts and devices still need testing. Start from **Sign in with Google** in the Android app; the callback URL below is registered in Google Cloud and is not a standalone login page. The steps below describe configuration for another deployment or a replacement Google client.
 
 Create a Google Cloud project or select your existing project. Configure Google Auth Platform branding and the audience, then create an OAuth client of type **Web application**. This app uses a browser-to-server Google flow followed by a separate PKCE-protected handoff into Android.
 

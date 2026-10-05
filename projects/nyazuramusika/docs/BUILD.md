@@ -11,6 +11,10 @@ bash gradlew --no-daemon testDebugUnitTest assembleDebug
 
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The default API origin is `https://nyazuramusika.shagayabrian899.chatgpt.site`. A different HTTPS service can be used with `-PmarketApiOrigin=https://your-service.example`.
 
+The current downloadable APK is version **1.1.1**, built and tested in [GitHub Actions run 37283315638](https://github.com/ShagyMunya/brian-shagaya-portfolio/actions/runs/37283315638). Its SHA-256 is `fb0e93b2c6a19f094423a36e33ecdab33aa79913cdb8f74efeb94eaaee6aba69`.
+
+Its signing key differs from the previous 1.1.0 test APK, so an upgrade over that installation is rejected by Android. Save any unfinished form details, uninstall the previous test app, install this APK and sign in again.
+
 GitHub Actions builds the APK on Android source changes. The repository download is updated after a successful build. Debug builds are for testing; a changing CI debug signing key can require uninstalling the previous test APK. Use an owner-managed release signing key for ongoing distribution.
 
 ## Service

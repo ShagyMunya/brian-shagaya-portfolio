@@ -1,10 +1,23 @@
 # NyazuraMusika
 
-A native Android marketplace for buying and selling goods around Nyazura. Built with Java, a Cloudflare Workers service, D1 and R2. Version 1.1 adds Google accounts, server-enforced roles, live inspection, saved goods and EcoCash purchase records.
+A native Android marketplace for buying and selling goods around Nyazura. Built with Java, a Cloudflare Workers service, D1 and R2. Version 1.1.1 includes Google accounts, server-enforced roles, live inspection, saved goods, EcoCash purchase records and visible product-posting feedback.
 
 [Download the Android test APK](https://github.com/ShagyMunya/brian-shagaya-portfolio/raw/refs/heads/main/projects/nyazuramusika/downloads/NyazuraMusika.apk)
 
-**Current deployment:** the shared service is public and Google OAuth credentials are configured on the server as of 5 October 2026. Start sign-in from the Android app's **Sign in with Google** button. A complete Google account login and return to Android still need device testing; an automated browser could not open the site. Live video needs two-device testing and TURN credentials for networks requiring a relay.
+This test APK has a different signing key from version 1.1.0. Save any unfinished product details, uninstall the previous test app, install this APK and sign in again with the same Google account.
+
+**Current deployment:** the shared service is public and Google OAuth credentials are configured on the server as of 5 October 2026. Start sign-in from the Android app's **Sign in with Google** button. Google sign-in has been confirmed for the owner account in production. Live video needs two-device testing and TURN credentials for networks requiring a relay.
+
+## Posting goods
+
+Open **Account → Sell goods**, complete the product form and tap **Post goods for sale**. Version 1.1.1 highlights the first invalid field and displays its explanation in a dialog. The button shows progress during posting, and a rejected request displays its reason while retaining the entered details on the current form.
+
+| Field | Requirement |
+| --- | --- |
+| Product title | 3–100 characters |
+| Description | 10–2,000 characters |
+| Price | A positive amount with at most two decimal places, such as `19.99` |
+| Collection area | 2–80 characters |
 
 ## Account roles
 
@@ -36,6 +49,6 @@ The service requires D1 `DB`, R2 `BUCKET` and all generated migrations. Google s
 
 ## Validation and limitations
 
-Automated checks cover Google signatures and claims, OAuth replay protection, native PKCE, roles, suspension, ownership, private call access, exact prices, duplicate purchase protection and receipt states. Android builds and price/phone tests run in GitHub Actions. The Google provider handoff, actual two-phone video, EcoCash app handoff and print dialog still need physical-device testing after configuration. No real financial transaction was made during development.
+Automated checks cover Google signatures and claims, OAuth replay protection, native PKCE, roles, suspension, ownership, private call access, exact prices, duplicate purchase protection and receipt states. Android builds and price/phone tests run in GitHub Actions. The owner's Google login and account access have been observed in production. Actual two-phone video, EcoCash app handoff and the print dialog still need physical-device testing. No real financial transaction was made during development.
 
 This is an early version built with AI assistance. Live-check inboxes refresh manually. Buyer inspection is the buyer's own statement; seller payment confirmation is the seller's own statement. Listings, records and stored photos remain until removed or cleaned up by the owner. Use the original EcoCash confirmation as the authoritative payment evidence.
